@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">Battery Meter</string>
+    <string name="accessibility_service_description">Displays the battery meter overlay over all apps, including system settings and banking apps.</string>
+</resources>
