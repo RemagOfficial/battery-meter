@@ -54,6 +54,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.text.font.FontWeight
@@ -95,6 +96,9 @@ class BatteryOverlayService : AccessibilityService(), LifecycleOwner, ViewModelS
         const val KEY_HIDE_ON_LOCKSCREEN = "hide_on_lockscreen"
         const val KEY_HIDE_NON_FULLSCREEN = "hide_non_fullscreen"
         const val KEY_BLACKLISTED_APPS = "blacklisted_apps"
+        const val KEY_GRADIENT_MODE = "gradient_mode"
+        const val KEY_RAINBOW_MODE = "rainbow_mode"
+        const val KEY_RAINBOW_SPEED = "rainbow_speed"
         
         const val DEFAULT_COLOR_RANGES = "100:FF00FF00,50:FFFFFF00,20:FFFF0000" // Green, Yellow, Red
     }
@@ -124,6 +128,9 @@ class BatteryOverlayService : AccessibilityService(), LifecycleOwner, ViewModelS
     private var hideOnLockscreen by mutableStateOf(false)
     private var hideNonFullscreen by mutableStateOf(false)
     private var blacklistedApps by mutableStateOf("")
+    private var gradientMode by mutableStateOf(false)
+    private var rainbowMode by mutableStateOf(false)
+    private var rainbowSpeed by mutableIntStateOf(50)
     
     // Visibility restriction state
     private var isAppBlacklisted by mutableStateOf(false)
@@ -197,6 +204,9 @@ class BatteryOverlayService : AccessibilityService(), LifecycleOwner, ViewModelS
                 blacklistedApps = p.getString(KEY_BLACKLISTED_APPS, "") ?: ""
                 checkVisibilityRestrictions()
             }
+            KEY_GRADIENT_MODE -> gradientMode = p.getBoolean(KEY_GRADIENT_MODE, false)
+            KEY_RAINBOW_MODE -> rainbowMode = p.getBoolean(KEY_RAINBOW_MODE, false)
+            KEY_RAINBOW_SPEED -> rainbowSpeed = p.getInt(KEY_RAINBOW_SPEED, 50)
         }
         updateOverlayParams()
     }
@@ -306,6 +316,9 @@ class BatteryOverlayService : AccessibilityService(), LifecycleOwner, ViewModelS
         hideOnLockscreen = prefs.getBoolean(KEY_HIDE_ON_LOCKSCREEN, false)
         hideNonFullscreen = prefs.getBoolean(KEY_HIDE_NON_FULLSCREEN, false)
         blacklistedApps = prefs.getString(KEY_BLACKLISTED_APPS, "") ?: ""
+        gradientMode = prefs.getBoolean(KEY_GRADIENT_MODE, false)
+        rainbowMode = prefs.getBoolean(KEY_RAINBOW_MODE, false)
+        rainbowSpeed = prefs.getInt(KEY_RAINBOW_SPEED, 50)
         prefs.registerOnSharedPreferenceChangeListener(prefsListener)
 
         val displayManager = getSystemService(DISPLAY_SERVICE) as DisplayManager
@@ -365,6 +378,9 @@ class BatteryOverlayService : AccessibilityService(), LifecycleOwner, ViewModelS
                                     opacity = meterOpacity,
                                     cap = cap,
                                     colorRanges = ranges,
+                                    gradientMode = gradientMode,
+                                    rainbowMode = rainbowMode,
+                                    rainbowSpeed = rainbowSpeed,
                                     depleteFromRight = depleteFromRight,
                                     showBg = showBg && index == 0,
                                     isCharging = source.isCharging,
@@ -404,6 +420,9 @@ class BatteryOverlayService : AccessibilityService(), LifecycleOwner, ViewModelS
                             opacity = meterOpacity,
                             cap = cap,
                             ranges = ranges,
+                            gradientMode = gradientMode,
+                            rainbowMode = rainbowMode,
+                            rainbowSpeed = rainbowSpeed,
                             depleteFromRight = depleteFromRight,
                             showBg = showBg,
                             chargeSpeed = chargeSpeed,
@@ -743,6 +762,9 @@ fun RingContent(
     opacity: Int,
     cap: StrokeCap,
     ranges: List<Pair<Int, Color>>,
+    gradientMode: Boolean,
+    rainbowMode: Boolean,
+    rainbowSpeed: Int,
     depleteFromRight: Boolean,
     showBg: Boolean,
     chargeSpeed: Int,
@@ -763,6 +785,9 @@ fun RingContent(
             opacity = opacity,
             cap = cap,
             colorRanges = ranges,
+            gradientMode = gradientMode,
+            rainbowMode = rainbowMode,
+            rainbowSpeed = rainbowSpeed,
             depleteFromRight = depleteFromRight,
             showBg = showBg,
             isCharging = source.isCharging,
@@ -800,6 +825,9 @@ fun BatteryMeter(
     opacity: Int, 
     cap: StrokeCap, 
     colorRanges: List<Pair<Int, Color>>, 
+    gradientMode: Boolean = false,
+    rainbowMode: Boolean = false,
+    rainbowSpeed: Int = 50,
     depleteFromRight: Boolean, 
     showBg: Boolean, 
     isCharging: Boolean, 
@@ -811,9 +839,23 @@ fun BatteryMeter(
     val totalSize = sizeDp.dp + strokeWidthDp
     
     val rotation = remember { Animatable(0f) }
+    val rainbowHue = remember { Animatable(0f) }
     
-    LaunchedEffect(isCharging, chargeSpeed, level, bluetoothColor) {
-        if (isCharging && chargeSpeed > 0 && level < 1f && bluetoothColor == null) {
+    LaunchedEffect(isCharging, chargeSpeed, level, bluetoothColor, rainbowMode, rainbowSpeed) {
+        if (rainbowMode && bluetoothColor == null) {
+            // Speed mapping: 1-100 to 10000ms - 500ms for full cycle
+            val duration = (101 - rainbowSpeed) * 95 + 500
+            while (true) {
+                rainbowHue.animateTo(
+                    targetValue = rainbowHue.value + 360f,
+                    animationSpec = tween(duration, easing = LinearEasing)
+                )
+            }
+        }
+    }
+
+    LaunchedEffect(isCharging, chargeSpeed, level, bluetoothColor, rainbowMode) {
+        if (!rainbowMode && isCharging && chargeSpeed > 0 && level < 1f && bluetoothColor == null) {
             // Map 1-100 to 5000ms - 200ms duration
             val duration = (101 - chargeSpeed) * 48 + 200
             while (true) {
@@ -836,10 +878,30 @@ fun BatteryMeter(
         val arcTopLeft = Offset(offset, offset)
         
         val alpha = opacity / 100f
+        val batteryPct = (level * 100).toInt()
 
-        val meterColor = bluetoothColor ?: colorRanges.firstOrNull { it.first >= (level * 100).toInt() }?.second 
-            ?: colorRanges.lastOrNull()?.second 
-            ?: Color.Green
+        val meterColor = if (bluetoothColor != null) {
+            bluetoothColor
+        } else if (rainbowMode) {
+            Color.hsv(rainbowHue.value % 360f, 1f, 1f)
+        } else if (gradientMode && colorRanges.size >= 2) {
+            // Interpolate between the two ranges the current level falls between
+            val sortedRanges = colorRanges.sortedBy { it.first }
+            val higher = sortedRanges.firstOrNull { it.first >= batteryPct }
+            val lower = sortedRanges.lastOrNull { it.first < batteryPct }
+            
+            if (higher != null && lower != null) {
+                val rangeWidth = higher.first - lower.first
+                val progressInRange = if (rangeWidth > 0) (batteryPct - lower.first).toFloat() / rangeWidth else 1f
+                lerp(lower.second, higher.second, progressInRange)
+            } else {
+                higher?.second ?: lower?.second ?: Color.Green
+            }
+        } else {
+            colorRanges.firstOrNull { it.first >= batteryPct }?.second 
+                ?: colorRanges.lastOrNull()?.second 
+                ?: Color.Green
+        }
 
         if (showBg) {
             drawCircle(

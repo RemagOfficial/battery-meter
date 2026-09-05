@@ -101,6 +101,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -112,6 +113,7 @@ import com.remag.batterymeter.ui.theme.BatteryMeterTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import java.util.Calendar
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -165,6 +167,7 @@ class MainActivity : ComponentActivity() {
                                 SettingsSubMenu.Customization -> "Customization"
                                 SettingsSubMenu.Bluetooth -> "Bluetooth"
                                 SettingsSubMenu.Visibility -> "Visibility Restrictions"
+                                SettingsSubMenu.About -> "About"
                             }
                             SettingsTopBar(title = title) {
                                 if (currentSubMenu == SettingsSubMenu.Home) {
@@ -297,7 +300,7 @@ class MainActivity : ComponentActivity() {
 }
 
 enum class Screen { Main, Settings }
-enum class SettingsSubMenu { Home, Appearance, ColorRanges, Customization, Bluetooth, Visibility }
+enum class SettingsSubMenu { Home, Appearance, ColorRanges, Customization, Bluetooth, Visibility, About }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -548,6 +551,9 @@ fun SettingsScreen(
     var opacity by remember { mutableFloatStateOf(prefs?.getInt(BatteryOverlayService.KEY_OPACITY, 100)?.toFloat() ?: 100f) }
     var strokeCap by remember { mutableIntStateOf(prefs?.getInt(BatteryOverlayService.KEY_STROKE_CAP, 1) ?: 1) }
     var colorRangesRaw by remember { mutableStateOf(prefs?.getString(BatteryOverlayService.KEY_COLOR_RANGES, BatteryOverlayService.DEFAULT_COLOR_RANGES) ?: BatteryOverlayService.DEFAULT_COLOR_RANGES) }
+    var gradientMode by remember { mutableStateOf(prefs?.getBoolean(BatteryOverlayService.KEY_GRADIENT_MODE, false) ?: false) }
+    var rainbowMode by remember { mutableStateOf(prefs?.getBoolean(BatteryOverlayService.KEY_RAINBOW_MODE, false) ?: false) }
+    var rainbowSpeed by remember { mutableFloatStateOf(prefs?.getInt(BatteryOverlayService.KEY_RAINBOW_SPEED, 50)?.toFloat() ?: 50f) }
     var autoReturnToPhone by remember { mutableStateOf(prefs?.getBoolean(BatteryOverlayService.KEY_AUTO_RETURN_TO_PHONE, false) ?: false) }
     var nestedRings by remember { mutableStateOf(prefs?.getBoolean(BatteryOverlayService.KEY_NESTED_RINGS, false) ?: false) }
     var depleteFromRight by remember { mutableStateOf(prefs?.getBoolean(BatteryOverlayService.KEY_DEPLETE_FROM_RIGHT, false) ?: false) }
@@ -557,11 +563,13 @@ fun SettingsScreen(
     var hideOnLockscreen by remember { mutableStateOf(prefs?.getBoolean(BatteryOverlayService.KEY_HIDE_ON_LOCKSCREEN, false) ?: false) }
     var hideNonFullscreen by remember { mutableStateOf(prefs?.getBoolean(BatteryOverlayService.KEY_HIDE_NON_FULLSCREEN, false) ?: false) }
     var blacklistedApps by remember { mutableStateOf(prefs?.getString(BatteryOverlayService.KEY_BLACKLISTED_APPS, "") ?: "") }
+    
+    var isRainbowUnlocked by remember { mutableStateOf(prefs?.getBoolean("rainbow_unlocked", false) ?: false) }
 
     var searchQuery by remember { mutableStateOf("") }
 
     // Save to prefs whenever values change
-    LaunchedEffect(offsetX, offsetY, meterSize, thickness, opacity, strokeCap, colorRangesRaw, autoReturnToPhone, nestedRings, depleteFromRight, showBg, chargeSpeed, hideOnLockscreen, hideNonFullscreen, blacklistedApps) {
+    LaunchedEffect(offsetX, offsetY, meterSize, thickness, opacity, strokeCap, colorRangesRaw, gradientMode, rainbowMode, rainbowSpeed, autoReturnToPhone, nestedRings, depleteFromRight, showBg, chargeSpeed, hideOnLockscreen, hideNonFullscreen, blacklistedApps, isRainbowUnlocked) {
         prefs?.edit {
             putInt(BatteryOverlayService.KEY_X, offsetX.toInt())
             putInt(BatteryOverlayService.KEY_Y, offsetY.toInt())
@@ -570,6 +578,9 @@ fun SettingsScreen(
             putInt(BatteryOverlayService.KEY_OPACITY, opacity.toInt())
             putInt(BatteryOverlayService.KEY_STROKE_CAP, strokeCap)
             putString(BatteryOverlayService.KEY_COLOR_RANGES, colorRangesRaw)
+            putBoolean(BatteryOverlayService.KEY_GRADIENT_MODE, gradientMode)
+            putBoolean(BatteryOverlayService.KEY_RAINBOW_MODE, rainbowMode)
+            putInt(BatteryOverlayService.KEY_RAINBOW_SPEED, rainbowSpeed.toInt())
             putBoolean(BatteryOverlayService.KEY_AUTO_RETURN_TO_PHONE, autoReturnToPhone)
             putBoolean(BatteryOverlayService.KEY_NESTED_RINGS, nestedRings)
             putBoolean(BatteryOverlayService.KEY_DEPLETE_FROM_RIGHT, depleteFromRight)
@@ -578,6 +589,7 @@ fun SettingsScreen(
             putBoolean(BatteryOverlayService.KEY_HIDE_ON_LOCKSCREEN, hideOnLockscreen)
             putBoolean(BatteryOverlayService.KEY_HIDE_NON_FULLSCREEN, hideNonFullscreen)
             putString(BatteryOverlayService.KEY_BLACKLISTED_APPS, blacklistedApps)
+            putBoolean("rainbow_unlocked", isRainbowUnlocked)
         }
     }
 
@@ -619,6 +631,12 @@ fun SettingsScreen(
                         title = "Visibility",
                         description = "Restrict where the meter shows",
                         onClick = { onSubMenuChange(SettingsSubMenu.Visibility) }
+                    )
+                    SettingsNavigationItem(
+                        icon = Icons.Default.Info,
+                        title = "About",
+                        description = "App version and developer info",
+                        onClick = { onSubMenuChange(SettingsSubMenu.About) }
                     )
                 }
             }
@@ -696,6 +714,44 @@ fun SettingsScreen(
                     Text(text = "Thresholds", style = MaterialTheme.typography.titleMedium)
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(text = "Meter color changes based on the first range it falls into (ordered by threshold).", style = MaterialTheme.typography.bodySmall)
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Gradient Mode", style = MaterialTheme.typography.bodyMedium)
+                            Text("Smoothly transition between colors.", style = MaterialTheme.typography.bodySmall)
+                        }
+                        Switch(checked = gradientMode, onCheckedChange = { gradientMode = it })
+                    }
+
+                    if (isRainbowUnlocked) {
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Rainbow Mode 🌈", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
+                                Text("Cycle through all colors constantly.", style = MaterialTheme.typography.bodySmall)
+                            }
+                            Switch(checked = rainbowMode, onCheckedChange = { rainbowMode = it })
+                        }
+                        
+                        if (rainbowMode) {
+                            AdjustmentSlider(
+                                label = "Rainbow Cycle Speed", 
+                                value = rainbowSpeed, 
+                                range = 1f..100f, 
+                                onValueChange = { rainbowSpeed = it }
+                            )
+                        }
+                    }
+
                     Spacer(modifier = Modifier.height(16.dp))
 
                     ColorRangeEditor(
@@ -1007,8 +1063,117 @@ fun SettingsScreen(
                     }
                 }
             }
+            SettingsSubMenu.About -> {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(16.dp)
+                        .verticalScroll(rememberScrollState()),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Spacer(modifier = Modifier.height(24.dp))
+                    
+                    Icon(
+                        imageVector = Icons.Default.Settings,
+                        contentDescription = null,
+                        modifier = Modifier.size(80.dp),
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                    
+                    Spacer(modifier = Modifier.height(16.dp))
+                    
+                    Text(
+                        text = "Battery Meter",
+                        style = MaterialTheme.typography.headlineMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    
+                    val packageInfo = remember {
+                        try {
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                localContext.packageManager.getPackageInfo(localContext.packageName, PackageManager.PackageInfoFlags.of(0))
+                            } else {
+                                @Suppress("DEPRECATION")
+                                localContext.packageManager.getPackageInfo(localContext.packageName, 0)
+                            }
+                        } catch (e: Exception) {
+                            null
+                        }
+                    }
+                    
+                    val version = packageInfo?.versionName ?: "Unknown"
+                    val code = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                        packageInfo?.longVersionCode?.toString() ?: "Unknown"
+                    } else {
+                        @Suppress("DEPRECATION")
+                        packageInfo?.versionCode?.toString() ?: "Unknown"
+                    }
+                    
+                    Text(
+                        text = "Version $version ($code)",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    
+                    Spacer(modifier = Modifier.height(32.dp))
+                    HorizontalDivider()
+                    Spacer(modifier = Modifier.height(32.dp))
+                    
+                    Text(
+                        text = "Developer Information",
+                        style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.fillMaxWidth(),
+                        textAlign = TextAlign.Start
+                    )
+                    
+                    Spacer(modifier = Modifier.height(8.dp))
+                    
+                    var tapCount by remember { mutableIntStateOf(0) }
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                tapCount++
+                                if (tapCount >= 5 && !isRainbowUnlocked) {
+                                    isRainbowUnlocked = true
+                                    Toast.makeText(localContext, "Rainbow Mode Unlocked! 🌈", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                        )
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Text(
+                                text = "Created by Remag",
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                text = "A minimalist battery overlay for power users.",
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                        }
+                    }
+                    
+                    Spacer(modifier = Modifier.height(32.dp))
+                    
+                    Text(
+                        text = "© ${Calendar.getInstance().get(Calendar.YEAR)} Remag Apps",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
         }
     }
+}
+
+// Helper to get Activity
+fun Context.getActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.getActivity()
+    else -> null
 }
 
 @Composable
@@ -1045,13 +1210,6 @@ fun SettingsNavigationItem(
             Icon(Icons.Default.ChevronRight, contentDescription = null)
         }
     }
-}
-
-// Helper to get Activity
-fun Context.getActivity(): Activity? = when (this) {
-    is Activity -> this
-    is ContextWrapper -> baseContext.getActivity()
-    else -> null
 }
 
 @Composable
